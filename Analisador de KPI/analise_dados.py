@@ -33,13 +33,16 @@ def analisar_dados_os(caminho_arquivo):
         df_filtrado = pd.DataFrame(dados)
 
         # Converter colunas relevantes para numérico ou datetime
-        df_filtrado['Tempo 1° Atend.'] = df_filtrado['Tempo 1° Atend.'].apply(
-            lambda x: sum(int(t) * 60**i for i, t in enumerate(reversed(x.split(':'))))
-        )
-        df_filtrado['Data'] = pd.to_datetime(df_filtrado['Data'], format='%d/%m/%Y')
-        df_filtrado['Última atualização'] = pd.to_datetime(
-            df_filtrado['Última atualização'], format='%d/%m/%Y %H:%M:%S'
-        )
+        if 'Tempo 1° Atend.' in df_filtrado:
+            df_filtrado["Tempo 1° Atend."] = df_filtrado["Tempo 1° Atend."].apply(
+                lambda x: sum(int(t) * 60**i for i, t in enumerate(reversed(x.split(':'))))
+            )
+        if 'Data' in df_filtrado:
+            df_filtrado["Data"] = pd.to_datetime(df_filtrado["Data"], format='%d/%m/%Y')
+        if 'Última atualização' in df_filtrado:
+            df_filtrado["Última atualização"] = pd.to_datetime(
+                df_filtrado["Última atualização"], format='%d/%m/%Y %H:%M:%S'
+            )
 
         # --- Análise ---
 
@@ -72,42 +75,123 @@ def analisar_dados_os(caminho_arquivo):
         df_filtrado['Tempo em Aberto (segundos)'] = df_filtrado[
             'Tempo em Aberto'
         ].apply(converter_para_segundos)
-        os_mais_antigas = df_filtrado.sort_values(
-            by='Tempo em Aberto (segundos)', ascending=False
-        )[['OS', 'Tempo em Aberto']].to_dict(orient='records')
+
+        # Determinar as colunas 'Equipamento' e 'Tag'
+        equipamento_coluna = 'Descrição do Bem' if 'Descrição do Bem' in df_filtrado else None
+        tag_coluna = 'TAG' if 'TAG' in df_filtrado else None
+
+        # Obter OS mais antigas
+        if 'Tempo em Aberto' in df_filtrado:
+            if equipamento_coluna and tag_coluna:
+                os_mais_antigas = df_filtrado.sort_values(
+                    by='Tempo em Aberto (segundos)', ascending=False
+                )[['OS', 'Tempo em Aberto', equipamento_coluna, tag_coluna]].to_dict(orient='records')
+                # Renomear as colunas no resultado
+                for os in os_mais_antigas:
+                    os['Equipamento'] = os.pop(equipamento_coluna)
+                    os['Tag'] = os.pop(tag_coluna)
+            elif equipamento_coluna:
+                os_mais_antigas = df_filtrado.sort_values(
+                    by='Tempo em Aberto (segundos)', ascending=False
+                )[['OS', 'Tempo em Aberto', equipamento_coluna]].to_dict(orient='records')
+                for os in os_mais_antigas:
+                    os['Equipamento'] = os.pop(equipamento_coluna)
+                if 'TAG' not in df_filtrado:
+                    for os in os_mais_antigas:
+                        os['Tag'] = 'N/A'
+            elif tag_coluna:
+                os_mais_antigas = df_filtrado.sort_values(
+                    by='Tempo em Aberto (segundos)', ascending=False
+                )[['OS', 'Tempo em Aberto', tag_coluna]].to_dict(orient='records')
+                for os in os_mais_antigas:
+                     os['Tag'] = os.pop(tag_coluna)
+                if 'Descrição do Bem' not in df_filtrado:
+                    for os in os_mais_antigas:
+                        os['Equipamento'] = 'N/A'
+            else:
+                os_mais_antigas = df_filtrado.sort_values(
+                    by='Tempo em Aberto (segundos)', ascending=False
+                )[['OS', 'Tempo em Aberto']].to_dict(orient='records')
+                for os in os_mais_antigas:
+                    os['Equipamento'] = 'N/A'
+                    os['Tag'] = 'N/A'
+        else:
+            os_mais_antigas = []  # Ou alguma outra lógica apropriada se 'Tempo em Aberto' não existir
 
         # 3. Quantidade em corretiva
-        quantidade_corretiva = len(df_filtrado[df_filtrado['Tipo OS'] == 'CORRETIVA'])
+        if 'Tipo OS' in df_filtrado:
+            quantidade_corretiva = len(df_filtrado[df_filtrado['Tipo OS'] == 'CORRETIVA'])
 
-        # 4. Quantidade em transporte de ultrassom
-        quantidade_ultrassom = len(
-            df_filtrado[
+            # 4. Quantidade em transporte de ultrassom
+            quantidade_ultrassom = len(
+                df_filtrado[
+                    df_filtrado['Tipo OS'].str.contains(
+                        'TRANSPORTE DE ULTRA-SOM', case=False, na=False
+                    )
+                ]
+            )
+            codigos_os_ultrassom = df_filtrado[
                 df_filtrado['Tipo OS'].str.contains(
                     'TRANSPORTE DE ULTRA-SOM', case=False, na=False
                 )
-            ]
-        )
-        codigos_os_ultrassom = df_filtrado[
-            df_filtrado['Tipo OS'].str.contains(
-                'TRANSPORTE DE ULTRA-SOM', case=False, na=False
-            )
-        ]['OS'].tolist()
+            ]['OS'].tolist()
 
-        # 5. Quantidade em suporte ao usuário
-        quantidade_suporte = len(
-            df_filtrado[df_filtrado['Tipo OS'] == 'SUPORTE AO USUARIO']
-        )
+            # 5. Quantidade em suporte ao usuário
+            quantidade_suporte = len(
+                df_filtrado[df_filtrado['Tipo OS'] == 'SUPORTE AO USUARIO']
+            )
+        else:
+            quantidade_corretiva = 0
+            quantidade_ultrassom = 0
+            codigos_os_ultrassom = []
+            quantidade_suporte = 0
 
         # 6. Últimas atualizações fora do prazo
         uma_semana_atras = datetime.now() - timedelta(weeks=1)
-        atualizacoes_atrasadas = df_filtrado[
-            df_filtrado['Última atualização'] < uma_semana_atras
-        ][['OS', 'Última atualização']].to_dict(orient='records')
+        if 'Última atualização' in df_filtrado:
+            if equipamento_coluna and tag_coluna:
+                atualizacoes_atrasadas = df_filtrado[
+                    df_filtrado['Última atualização'] < uma_semana_atras
+                ][['OS', 'Última atualização', equipamento_coluna, tag_coluna]].to_dict(orient='records')
+                # Renomear as colunas no resultado
+                for atualizacao in atualizacoes_atrasadas:
+                    atualizacao['Equipamento'] = atualizacao.pop(equipamento_coluna)
+                    atualizacao['Tag'] = atualizacao.pop(tag_coluna)
+            elif equipamento_coluna:
+                atualizacoes_atrasadas = df_filtrado[
+                    df_filtrado['Última atualização'] < uma_semana_atras
+                ][['OS', 'Última atualização', equipamento_coluna]].to_dict(orient='records')
+                for atualizacao in atualizacoes_atrasadas:
+                    atualizacao['Equipamento'] = atualizacao.pop(equipamento_coluna)
+                if 'TAG' not in df_filtrado:
+                    for atualizacao in atualizacoes_atrasadas:
+                        atualizacao['Tag'] = 'N/A'
+            elif tag_coluna:
+                atualizacoes_atrasadas = df_filtrado[
+                    df_filtrado['Última atualização'] < uma_semana_atras
+                ][['OS', 'Última atualização', tag_coluna]].to_dict(orient='records')
+                for atualizacao in atualizacoes_atrasadas:
+                    atualizacao['Tag'] = atualizacao.pop(tag_coluna)
+                if 'Descrição do Bem' not in df_filtrado:
+                    for atualizacao in atualizacoes_atrasadas:
+                        atualizacao['Equipamento'] = 'N/A'
+            else:
+                atualizacoes_atrasadas = df_filtrado[
+                    df_filtrado['Última atualização'] < uma_semana_atras
+                ][['OS', 'Última atualização']].to_dict(orient='records')
+                for atualizacao in atualizacoes_atrasadas:
+                    atualizacao['Equipamento'] = 'N/A'
+                    atualizacao['Tag'] = 'N/A'
+        else:
+            atualizacoes_atrasadas = []
 
         # 7. Tempo de 1º atendimento > 5 minutos
-        os_acima_5_min = df_filtrado[df_filtrado['Tempo 1° Atend.'] > 300][
-            ['OS', 'Tempo 1° Atend.']
-        ].to_dict(orient='records')
+        if 'Tempo 1° Atend.' in df_filtrado:
+            os_acima_5_min = df_filtrado[df_filtrado['Tempo 1° Atend.'] > 300][
+                ['OS', 'Tempo 1° Atend.']
+            ].to_dict(orient='records')
+        else:
+            os_acima_5_min = []
 
         # Preparar dados para tabelas e visualizações
         tabela_contagem_os = contagem_os.to_dict(orient='records')
